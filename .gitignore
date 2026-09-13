@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.git/
+static/output/*.png
+!static/output/.gitkeep
+dep.log
+dep.err
+git_commit.py

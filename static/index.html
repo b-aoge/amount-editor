@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>截图金额修改器 · V1</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+    background: #F4F3EE; color: #1A1B1C; padding: 24px 16px;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: #6B7280; margin-bottom: 16px; }
+  .card {
+    background: #fff; border: 1px solid #E4E3DD; border-radius: 12px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  .card h2 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+  .upload-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 9px 18px; border-radius: 8px; border: none;
+    font-size: 14px; cursor: pointer; background: #8BC8EA; color: #1A1B1C; font-weight: 600;
+  }
+  .btn:hover { filter: brightness(0.96); }
+  .btn.gray { background: #E4E3DD; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  canvas {
+    display: block; max-width: 100%; border: 1px solid #E4E3DD;
+    border-radius: 8px; cursor: crosshair; background: #fff;
+  }
+  .hint { font-size: 12px; color: #6B7280; margin-top: 8px; }
+  .form-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 12px; color: #6B7280; }
+  .field input, .field select {
+    padding: 8px 10px; border: 1px solid #E4E3DD; border-radius: 8px; font-size: 14px;
+    min-width: 180px; background: #fff;
+  }
+  .result-box img {
+    display: block; max-width: 100%; border: 1px solid #E4E3DD; border-radius: 8px;
+  }
+  .status { font-size: 13px; color: #6B7280; margin-top: 10px; min-height: 18px; }
+  .status.err { color: #EA6668; }
+  .status.ok { color: #52C41A; }
+  .hidden { display: none !important; }
+  #boxInfo { font-size: 12px; color: #6B7280; margin-top: 8px; font-family: Consolas, monospace; }
+  .amount-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .amount-item {
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    border: 1px solid #E4E3DD; border-radius: 8px; cursor: pointer; font-size: 14px;
+    background: #fff;
+  }
+  .amount-item:hover { border-color: #8BC8EA; }
+  .amount-item.active { border-color: #EA6668; background: rgba(234,102,104,0.06); }
+  .amount-item .tag {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(139,200,234,0.2);
+    color: #1A1B1C; flex-shrink: 0;
+  }
+  .amount-item .conf { margin-left: auto; font-size: 12px; color: #6B7280; }
+  .badge { font-size: 12px; padding: 3px 10px; border-radius: 10px; background: rgba(234,102,104,0.1); color: #EA6668; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>截图金额修改器（V1）</h1>
+  <div class="sub">上传截图 → 自动识别金额 → 输入指令「把 1,234.50 改成 5,678.90」→ 一键处理下载</div>
+
+  <div class="card">
+    <h2>① 上传截图（自动识别图中的金额）</h2>
+    <div class="upload-row">
+      <input type="file" id="fileInput" accept="image/*" class="btn gray" style="border:1px solid #E4E3DD;">
+      <button class="btn gray" id="clearBtn" disabled>清除</button>
+    </div>
+    <canvas id="cv" width="900" height="500"></canvas>
+    <div class="hint">可点击下方识别出的金额选中目标；也可以直接在图上按住鼠标拖动框选（兜底方式）。</div>
+    <div id="amountArea" class="hidden">
+      <div id="amountList" class="amount-list"></div>
+    </div>
+    <div id="boxInfo">尚未选择目标</div>
+  </div>
+
+  <div class="card">
+    <h2>② 填写修改指令</h2>
+    <div class="form-row">
+      <div class="field" style="flex:1 1 300px;">
+        <label>指令（自动定位）</label>
+        <input type="text" id="instruction" placeholder="把 1,234.50 改成 5,678.90" autocomplete="off">
+      </div>
+      <div class="field" style="flex:1 1 160px;">
+        <label>新值（未写指令时用）</label>
+        <input type="text" id="newValue" placeholder="5,678.90" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>字体</label>
+        <select id="fontSel">
+          <option value="auto" selected>自动识别（推荐）</option>
+          <option value="Arial">Arial</option>
+          <option value="Arial Bold">Arial Bold</option>
+          <option value="微软雅黑">微软雅黑</option>
+          <option value="微软雅黑 Bold">微软雅黑 Bold</option>
+          <option value="黑体 SimHei">黑体 SimHei</option>
+          <option value="宋体 SimSun">宋体 SimSun</option>
+        </select>
+      </div>
+      <button class="btn" id="submitBtn">处理图片</button>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="card result-box hidden" id="resultCard">
+    <h2>③ 处理结果</h2>
+    <img id="resultImg" alt="处理结果">
+    <div style="margin-top:12px;">
+      <a class="btn" id="downloadBtn" download="result.png">下载图片</a>
+      <button class="btn gray" id="openBtn" style="margin-left:8px;">在新窗口打开</button>
+      <button class="btn gray" id="redoBtn" style="margin-left:8px;">重新修改</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('cv');
+  var ctx = canvas.getContext('2d');
+  var fileInput = document.getElementById('fileInput');
+  var clearBtn = document.getElementById('clearBtn');
+  var submitBtn = document.getElementById('submitBtn');
+  var boxInfo = document.getElementById('boxInfo');
+  var statusEl = document.getElementById('status');
+  var resultCard = document.getElementById('resultCard');
+  var resultImg = document.getElementById('resultImg');
+  var downloadBtn = document.getElementById('downloadBtn');
+  var openBtn = document.getElementById('openBtn');
+  var redoBtn = document.getElementById('redoBtn');
+  var amountArea = document.getElementById('amountArea');
+  var amountList = document.getElementById('amountList');
+  var instructionEl = document.getElementById('instruction');
+
+  var img = null;
+  var scale = 1;
+  var origW = 0, origH = 0;
+  var box = null;
+  var amounts = [];
+  var selectedIdx = -1;
+  var drawing = null;
+  var isDown = false;
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (!img) return;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    amounts.forEach(function (a, i) {
+      var bx = a.box[0] * scale, by = a.box[1] * scale;
+      var bw = a.box[2] * scale, bh = a.box[3] * scale;
+      ctx.strokeStyle = (i === selectedIdx) ? '#EA6668' : '#52C41A';
+      ctx.lineWidth = (i === selectedIdx) ? 2.5 : 1.5;
+      ctx.strokeRect(bx, by, bw, bh);
+      if (i === selectedIdx) {
+        ctx.fillStyle = 'rgba(234,102,104,0.12)';
+        ctx.fillRect(bx, by, bw, bh);
+      }
+    });
+
+    if (drawing) {
+      var d = drawing;
+      var x = Math.min(d.sx, d.ex), y = Math.min(d.sy, d.ey);
+      var w = Math.abs(d.ex - d.sx), h = Math.abs(d.ey - d.sy);
+      ctx.strokeStyle = '#EA6668'; ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(x, y, w, h);
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(234,102,104,0.15)';
+      ctx.fillRect(x, y, w, h);
+    }
+  }
+
+  function fitCanvas() {
+    if (!img) return;
+    var maxW = 900, maxH = 560;
+    var ratio = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
+    scale = ratio;
+    canvas.width = Math.round(img.naturalWidth * ratio);
+    canvas.height = Math.round(img.naturalHeight * ratio);
+    draw();
+  }
+
+  fileInput.addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      img = new Image();
+      img.onload = function () {
+        origW = img.naturalWidth; origH = img.naturalHeight;
+        box = null; drawing = null; amounts = []; selectedIdx = -1;
+        fitCanvas();
+        updateInfo();
+        submitBtn.disabled = true;
+        resultCard.classList.add('hidden');
+        statusEl.textContent = '正在识别图中金额…';
+        runAnalyze(f);
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(f);
+  });
+
+  function runAnalyze(file) {
+    var fd = new FormData();
+    fd.append('image', file);
+    fetch('/api/analyze', { method: 'POST', body: fd })
+      .then(function (r) { if (!r.ok) throw new Error('分析失败'); return r.json(); })
+      .then(function (data) {
+        amounts = data.amounts || [];
+        selectedIdx = -1;
+        if (amounts.length === 1) {
+          selectedIdx = 0;
+          var a = amounts[0];
+          box = { x: Math.round(a.box[0]), y: Math.round(a.box[1]),
+                  w: Math.round(a.box[2]), h: Math.round(a.box[3]) };
+        } else {
+          box = null;
+        }
+        renderAmountList();
+        draw();
+        if (amounts.length === 0) {
+          statusEl.textContent = '未识别到金额，请手动框选目标数字。';
+          statusEl.classList.remove('ok', 'err');
+        } else if (amounts.length === 1) {
+          statusEl.textContent = '识别到 1 处金额，已自动选中。填新值或输入指令后点「处理图片」。';
+          statusEl.classList.add('ok');
+        } else {
+          statusEl.textContent = '识别到 ' + amounts.length + ' 处金额，点击列表项或输入指令选择目标。';
+          statusEl.classList.add('ok');
+        }
+        updateInfo();
+      })
+      .catch(function (err) {
+        statusEl.textContent = '识别失败：' + err.message;
+        statusEl.classList.add('err');
+      });
+  }
+
+  function renderAmountList() {
+    amountList.innerHTML = '';
+    if (amounts.length === 0) {
+      amountArea.classList.add('hidden');
+      return;
+    }
+    amountArea.classList.remove('hidden');
+    amounts.forEach(function (a, i) {
+      var div = document.createElement('div');
+      div.className = 'amount-item' + (i === selectedIdx ? ' active' : '');
+      div.innerHTML = '<span class="tag">金额' + (i + 1) + '</span>' +
+        '<span>' + a.text + '</span>' +
+        '<span class="conf">置信度 ' + (a.conf * 100).toFixed(0) + '%</span>';
+      div.addEventListener('click', function () {
+        selectedIdx = (selectedIdx === i) ? -1 : i;
+        if (selectedIdx >= 0) {
+          var a = amounts[selectedIdx];
+          box = { x: Math.round(a.box[0]), y: Math.round(a.box[1]),
+                  w: Math.round(a.box[2]), h: Math.round(a.box[3]) };
+        } else {
+          box = null;
+        }
+        renderAmountList();
+        draw();
+        updateInfo();
+      });
+      amountList.appendChild(div);
+    });
+  }
+
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  canvas.addEventListener('mousedown', function (e) {
+    if (!img) return;
+    var p = canvasPos(e);
+    isDown = true;
+    drawing = { sx: p.x, sy: p.y, ex: p.x, ey: p.y };
+  });
+
+  canvas.addEventListener('mousemove', function (e) {
+    if (!isDown || !drawing) return;
+    var p = canvasPos(e);
+    drawing.ex = p.x; drawing.ey = p.y;
+    draw();
+  });
+
+  canvas.addEventListener('mouseup', function () {
+    if (!isDown) return;
+    isDown = false;
+    if (drawing) {
+      var d = drawing;
+      var x = Math.min(d.sx, d.ex), y = Math.min(d.sy, d.ey);
+      var w = Math.abs(d.ex - d.sx), h = Math.abs(d.ey - d.sy);
+      if (w > 4 && h > 4) {
+        box = {
+          x: Math.round(x / scale), y: Math.round(y / scale),
+          w: Math.round(w / scale), h: Math.round(h / scale)
+        };
+        selectedIdx = -1;
+        renderAmountList();
+      }
+      drawing = null;
+      draw();
+      updateInfo();
+    }
+  });
+
+  clearBtn.addEventListener('click', function () {
+    box = null; drawing = null; selectedIdx = -1;
+    renderAmountList();
+    draw(); updateInfo();
+  });
+
+  function updateInfo() {
+    var ins = instructionEl.value.trim();
+    var val = document.getElementById('newValue').value.trim();
+    if (selectedIdx >= 0) {
+      var a = amounts[selectedIdx];
+      boxInfo.innerHTML = '已选择目标：<b>' + a.text + '</b>（自动定位）';
+      clearBtn.disabled = false;
+    } else if (box) {
+      boxInfo.textContent = '已框选（原图坐标）: x=' + box.x + ', y=' + box.y +
+        ', 宽=' + box.w + ', 高=' + box.h;
+      clearBtn.disabled = false;
+    } else {
+      boxInfo.textContent = '尚未选择目标：点击识别出的金额、手动框选，或直接输入指令';
+      clearBtn.disabled = true;
+    }
+    submitBtn.disabled = false;
+  }
+
+  instructionEl.addEventListener('input', function () {
+    var ins = instructionEl.value.trim();
+    var m = ins.match(/^(?:把|将|请把|请将|修改|更改)?\s*(?:金额|价格|价钱|数字|¥|￥)?\s*([\d,]+(?:\.\d+)?)\s*(?:改成|改为|换成|变为|变更为|调成|->|→|=>)\s*[¥￥$]?\s*([\d,]+(?:\.\d+)?)\s*(?:元|块钱)?\s*$/);
+    if (ins && !m) {
+      statusEl.textContent = '指令格式未识别，请用「把 1,234.50 改成 5,678.90」格式，或改用手动框选';
+      statusEl.classList.add('err');
+    } else if (ins) {
+      statusEl.textContent = '指令可识别：' + m[1] + ' → ' + m[2];
+      statusEl.classList.remove('err');
+      statusEl.classList.add('ok');
+    } else {
+      statusEl.textContent = '';
+      statusEl.classList.remove('err', 'ok');
+    }
+    updateInfo();
+  });
+  document.getElementById('newValue').addEventListener('input', updateInfo);
+
+  submitBtn.addEventListener('click', function () {
+    if (!img) {
+      statusEl.textContent = '请先上传截图';
+      statusEl.classList.add('err');
+      return;
+    }
+    var ins = instructionEl.value.trim();
+    var val = document.getElementById('newValue').value.trim();
+    var target = '';
+
+    var instMatch = ins.match(/^(?:把|将|请把|请将|修改|更改)?\s*(?:金额|价格|价钱|数字|¥|￥)?\s*([\d,]+(?:\.\d+)?)\s*(?:改成|改为|换成|变为|变更为|调成|->|→|=>)\s*[¥￥$]?\s*([\d,]+(?:\.\d+)?)\s*(?:元|块钱)?\s*$/);
+    if (instMatch) {
+      target = instMatch[1];
+      val = instMatch[2];
+    } else if (selectedIdx >= 0) {
+    } else if (!box) {
+      statusEl.textContent = '请输入指令，或选择/框选目标数字';
+      statusEl.classList.add('err');
+      return;
+    }
+
+    if (!val) {
+      statusEl.textContent = '缺少新值：请在指令中写明，或在“新值”栏填写';
+      statusEl.classList.add('err');
+      return;
+    }
+
+    statusEl.textContent = '处理中…'; statusEl.classList.remove('err', 'ok');
+    submitBtn.disabled = true;
+
+    var fd = new FormData();
+    var tmp = document.createElement('canvas');
+    tmp.width = origW; tmp.height = origH;
+    tmp.getContext('2d').drawImage(img, 0, 0, origW, origH);
+    tmp.toBlob(function (blob) {
+      fd.append('image', blob, 'screenshot.png');
+      fd.append('new_value', val);
+      fd.append('font', document.getElementById('fontSel').value);
+      if (target) {
+        fd.append('old_value', target);
+      } else {
+        fd.append('x', box.x); fd.append('y', box.y);
+        fd.append('w', box.w); fd.append('h', box.h);
+      }
+
+      fetch('/api/edit', { method: 'POST', body: fd })
+        .then(function (res) {
+          if (!res.ok) return res.text().then(function (t) { throw new Error(t); });
+          var outUrl = res.headers.get('X-Result-Url');
+          return res.blob().then(function (blob) { return { blob: blob, url: outUrl }; });
+        })
+        .then(function (r) {
+          if (r.url) {
+            resultImg.src = r.url;
+            downloadBtn.href = r.url;
+          } else {
+            var url = URL.createObjectURL(r.blob);
+            resultImg.src = url;
+            downloadBtn.href = url;
+          }
+          resultCard.classList.remove('hidden');
+          statusEl.textContent = '处理完成，见下方结果图。';
+          statusEl.classList.add('ok');
+          submitBtn.disabled = false;
+        })
+        .catch(function (err) {
+          statusEl.textContent = '处理失败：' + err.message;
+          statusEl.classList.add('err');
+          submitBtn.disabled = false;
+        });
+    }, 'image/png');
+  });
+
+  downloadBtn.addEventListener('click', function (e) {
+    var href = downloadBtn.href;
+    if (!href) { e.preventDefault(); return; }
+    e.preventDefault();
+    var a = document.createElement('a');
+    a.href = href;
+    a.download = 'result.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  });
+
+  openBtn.addEventListener('click', function () {
+    if (downloadBtn.href) window.open(downloadBtn.href, '_blank');
+  });
+
+  redoBtn.addEventListener('click', function () {
+    resultCard.classList.add('hidden');
+    statusEl.textContent = '';
+    box = null; drawing = null; selectedIdx = -1;
+    renderAmountList();
+    draw(); updateInfo();
+    instructionEl.value = '';
+    document.getElementById('newValue').value = '';
+  });
+})();
+</script>
+</body>
+</html>
