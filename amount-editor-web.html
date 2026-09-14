@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>截图金额修改器 · 网页版</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+    background: #F4F3EE; color: #1A1B1C; padding: 16px 12px 40px;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 19px; font-weight: 600; }
+  .sub { font-size: 13px; color: #6B7280; margin: 4px 0 14px; line-height: 1.5; }
+  .card {
+    background: #fff; border: 1px solid #E4E3DD; border-radius: 12px;
+    padding: 14px; margin-bottom: 14px;
+  }
+  .card h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+  .btn {
+    display: inline-block; padding: 10px 18px; border-radius: 10px; border: none;
+    font-size: 15px; cursor: pointer; background: #8BC8EA; color: #1A1B1C; font-weight: 600;
+    text-decoration: none; text-align: center;
+  }
+  .btn:active { filter: brightness(0.92); }
+  .btn.gray { background: #E4E3DD; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.block { display: block; width: 100%; }
+  #fileInput { display: none; }
+  .upload-zone {
+    border: 2px dashed #C9D4DE; border-radius: 12px; padding: 26px 12px;
+    text-align: center; color: #6B7280; font-size: 14px; cursor: pointer; background: #FBFCFD;
+  }
+  .upload-zone.have { display: none; }
+  canvas {
+    display: block; width: 100%; border: 1px solid #E4E3DD; border-radius: 10px;
+    cursor: crosshair; background: #fff; touch-action: none;
+  }
+  .hint { font-size: 12px; color: #6B7280; margin-top: 8px; line-height: 1.5; }
+  .form-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .field { display: flex; flex-direction: column; gap: 4px; flex: 1 1 200px; }
+  .field label { font-size: 12px; color: #6B7280; }
+  .field input {
+    padding: 9px 10px; border: 1px solid #E4E3DD; border-radius: 10px; font-size: 15px;
+    min-width: 0; width: 100%; background: #fff; color: #1A1B1C;
+  }
+  .amount-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .amount-item {
+    display: flex; align-items: center; gap: 8px; padding: 9px 12px;
+    border: 1px solid #E4E3DD; border-radius: 10px; font-size: 14px; background: #fff;
+  }
+  .amount-item.active { border-color: #EA6668; background: rgba(234,102,104,0.06); }
+  .amount-item .tag {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(139,200,234,0.2);
+    flex-shrink: 0;
+  }
+  .amount-item .conf { margin-left: auto; font-size: 12px; color: #6B7280; }
+  .result-box img {
+    display: block; max-width: 100%; border: 1px solid #E4E3DD; border-radius: 10px; margin-top: 8px;
+  }
+  .status { font-size: 13px; color: #6B7280; margin-top: 10px; line-height: 1.5; min-height: 18px; word-break: break-all; }
+  .status.err { color: #EA6668; }
+  .status.ok { color: #52C41A; }
+  .hidden { display: none !important; }
+  #boxInfo { font-size: 12px; color: #6B7280; margin-top: 8px; font-family: Consolas, monospace; word-break: break-all; }
+  .row { display: flex; gap: 10px; margin-top: 12px; }
+  .row .btn { flex: 1; }
+  .bar { height: 4px; background: #E4E3DD; border-radius: 2px; margin-top: 8px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0%; background: #8BC8EA; border-radius: 2px; transition: width .2s; }
+  .spinner {
+    display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(26,27,28,.25);
+    border-top-color: #1A1B1C; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>截图金额修改器（网页版）</h1>
+  <div class="sub">纯浏览器运行，不上传服务器。上传截图 → 识别金额 → 输入「把 800.00 改成 1,234.50」→ 处理下载。首次使用需加载识别引擎（约 10MB，之后有缓存）。</div>
+
+  <div class="card">
+    <h2>① 上传截图</h2>
+    <div class="upload-zone" id="uploadZone">
+      点击选择截图<br><span style="font-size:12px;">支持 APP 界面 / 凭证单据截图</span>
+    </div>
+    <input type="file" id="fileInput" accept="image/*">
+    <div id="editorArea" class="hidden">
+      <canvas id="cv"></canvas>
+      <div class="hint">可点击下方识别出的金额选中目标；也可在图上拖动框选。</div>
+      <div id="amountArea" class="hidden">
+        <div id="amountList" class="amount-list"></div>
+      </div>
+      <div id="boxInfo">尚未选择目标</div>
+      <div class="row">
+        <button class="btn gray" id="clearBtn">清除重选</button>
+        <button class="btn gray" id="reOcrBtn">重新识别</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>② 修改指令</h2>
+    <div class="form-row">
+      <div class="field">
+        <label>指令（自动定位，如：把 800 改成 1234）</label>
+        <input type="text" id="instruction" placeholder="把 800.00 改成 1,234.50" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>新值（未用指令时填这里）</label>
+        <input type="text" id="newValue" placeholder="1,234.50" autocomplete="off">
+      </div>
+    </div>
+    <div class="bar hidden" id="progBar"><div id="progFill"></div></div>
+    <div class="status" id="status"></div>
+    <button class="btn block" id="submitBtn" style="margin-top:10px;" disabled>处理图片</button>
+  </div>
+
+  <div class="card result-box hidden" id="resultCard">
+    <h2>③ 处理结果</h2>
+    <img id="resultImg" alt="处理结果">
+    <div class="row">
+      <a class="btn" id="downloadBtn" download="result.png">下载图片</a>
+      <button class="btn gray" id="redoBtn">重新修改</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+// CDN 备用源：主源不可用时自动换源加载识别引擎
+(function () {
+  if (typeof Tesseract !== 'undefined') return;
+  var alts = [
+    'https://unpkg.com/tesseract.js@5.1.1/dist/tesseract.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js'
+  ];
+  var i = 0;
+  function load() {
+    if (typeof Tesseract !== 'undefined' || i >= alts.length) return;
+    var s = document.createElement('script');
+    s.src = alts[i++];
+    s.onload = function () { if (typeof Tesseract === 'undefined') load(); };
+    s.onerror = load;
+    document.head.appendChild(s);
+  }
+  load();
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+
+  // ---------- DOM ----------
+  var uploadZone = document.getElementById('uploadZone');
+  var fileInput = document.getElementById('fileInput');
+  var editorArea = document.getElementById('editorArea');
+  var canvas = document.getElementById('cv');
+  var ctx = canvas.getContext('2d');
+  var clearBtn = document.getElementById('clearBtn');
+  var reOcrBtn = document.getElementById('reOcrBtn');
+  var amountArea = document.getElementById('amountArea');
+  var amountList = document.getElementById('amountList');
+  var boxInfo = document.getElementById('boxInfo');
+  var instructionEl = document.getElementById('instruction');
+  var newValueEl = document.getElementById('newValue');
+  var submitBtn = document.getElementById('submitBtn');
+  var statusEl = document.getElementById('status');
+  var progBar = document.getElementById('progBar');
+  var progFill = document.getElementById('progFill');
+  var resultCard = document.getElementById('resultCard');
+  var resultImg = document.getElementById('resultImg');
+  var downloadBtn = document.getElementById('downloadBtn');
+  var redoBtn = document.getElementById('redoBtn');
+
+  // ---------- 状态 ----------
+  var img = null;            // 原始 HTMLImageElement
+  var scale = 1;             // 画布缩放（相对原图）
+  var origW = 0, origH = 0;
+  var amounts = [];          // OCR 金额候选 [{text, box, conf}]
+  var selectedIdx = -1;
+  var manualBox = null;      // 手动框选（原图坐标）
+  var drawing = null;
+  var isDown = false;
+  var worker = null;
+  var ocrBusy = false;
+
+  // ---------- 工具 ----------
+  function $(id) { return document.getElementById(id); }
+  function showStatus(msg, cls) {
+    statusEl.textContent = msg;
+    statusEl.className = 'status' + (cls ? ' ' + cls : '');
+  }
+  function setProgress(p) {
+    if (p > 0 && p < 1) { progBar.classList.remove('hidden'); progFill.style.width = (p * 100).toFixed(0) + '%'; }
+    else progBar.classList.add('hidden');
+  }
+  function normalizeAmount(t) {
+    var s = String(t).replace(/[¥￥$,\s元块钱]/g, '').trim();
+    if (/^\d+\.$/.test(s)) s = s.slice(0, -1);
+    return s;
+  }
+  function isAmount(t) {
+    var s = normalizeAmount(t);
+    return /^\d+(?:\.\d+)?$/.test(s);
+  }
+  // 合并过程中的宽松判断：允许带货币符号、逗号、尾点
+  function looksAmountish(t) {
+    var s = String(t).replace(/\s/g, '');
+    return /^[¥￥$]?[\d,]+\.?\d*$/.test(s);
+  }
+
+  // ---------- Tesseract ----------
+  function ensureWorker() {
+    if (worker) return Promise.resolve(worker);
+    return new Promise(function (resolve, reject) {
+      if (typeof Tesseract === 'undefined') {
+        reject(new Error('识别引擎加载失败（网络被拦截），请刷新重试'));
+        return;
+      }
+      showStatus('正在加载识别引擎（首次约 10MB，请稍候）…');
+      setProgress(0.05);
+      var attempt = 0;
+      function tryCreate() {
+        attempt++;
+        Tesseract.createWorker('eng', 1, {
+          logger: function (m) {
+            if (m.status === 'recognizing text' && m.progress != null) setProgress(0.15 + m.progress * 0.8);
+            else if (m.status === 'loading language traineddata' || m.status === 'initializing api') setProgress(0.1);
+          }
+        }).then(function (w) {
+          return w.setParameters({
+            tessedit_char_whitelist: '0123456789.,¥￥$元 '
+          }).then(function () { return w; });
+        }).then(function (w) {
+          worker = w;
+          setProgress(0);
+          showStatus('');
+          resolve(w);
+        }).catch(function (e) {
+          setProgress(0);
+          if (attempt < 2) { showStatus('引擎加载中断，重试中…'); tryCreate(); }
+          else reject(new Error('识别引擎加载失败：' + (e && e.message || e)));
+        });
+      }
+      tryCreate();
+    });
+  }
+
+  // 降采样画布用于 OCR（长边 ~1100）
+  function makeOcrCanvas() {
+    var maxSide = 1100;
+    var r = Math.min(1, maxSide / Math.max(origW, origH));
+    var c = document.createElement('canvas');
+    c.width = Math.round(origW * r);
+    c.height = Math.round(origH * r);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return { canvas: c, ratio: r };
+  }
+
+  function runOcr() {
+    if (ocrBusy) return;
+    ocrBusy = true;
+    ensureWorker().then(function (w) {
+      showStatus('正在识别图中金额…');
+      var oc = makeOcrCanvas();
+      return w.recognize(oc.canvas).then(function (res) { return { res: res, ratio: oc.ratio }; });
+    }).then(function (o) {
+      var words = (o.res.data && o.res.data.words) || [];
+      var raw = [];
+      words.forEach(function (wd) {
+        var text = (wd.text || '').trim();
+        if (!text) return;
+        var b = wd.bbox || {};
+        raw.push({
+          text: text,
+          box: [Math.round(b.x0 / o.ratio), Math.round(b.y0 / o.ratio),
+                Math.round((b.x1 - b.x0) / o.ratio), Math.round((b.y1 - b.y0) / o.ratio)],
+          conf: typeof wd.confidence === 'number' ? wd.confidence / 100 : 0
+        });
+      });
+      var items = mergeAmountItems(raw);
+      amounts = items.filter(function (it) { return isAmount(it.text); });
+      amounts = dedupeOverlap(amounts);
+      selectedIdx = -1;
+      manualBox = null;
+      if (amounts.length === 1) {
+        selectedIdx = 0;
+        var a = amounts[0];
+        manualBox = { x: a.box[0], y: a.box[1], w: a.box[2], h: a.box[3] };
+      }
+      renderAmountList();
+      draw();
+      if (amounts.length === 0) {
+        showStatus('未识别到金额，请手动框选目标数字。', 'err');
+      } else if (amounts.length === 1) {
+        showStatus('识别到 1 处金额，已自动选中。填新值或指令后点「处理图片」。', 'ok');
+      } else {
+        showStatus('识别到 ' + amounts.length + ' 处金额，点选目标或输入指令。', 'ok');
+      }
+      updateInfo();
+      ocrBusy = false;
+    }).catch(function (e) {
+      ocrBusy = false;
+      showStatus('识别失败：' + (e && e.message || e), 'err');
+    });
+  }
+
+  // 合并 OCR 拆开的金额片段
+  function joinTexts(t1, t2) {
+    var a = t1.replace(/ /g, ''), b = t2.replace(/ /g, '');
+    var mx = Math.min(a.length, b.length);
+    for (var ov = mx; ov > 0; ov--) {
+      if (a.slice(-ov) === b.slice(0, ov)) return a + b.slice(ov);
+    }
+    return a + b;
+  }
+  function mergeAmountItems(items) {
+    var merged = [], used = {};
+    for (var i = 0; i < items.length; i++) {
+      if (used[i]) continue;
+      var cur = { text: items[i].text, box: items[i].box.slice(), conf: items[i].conf };
+      var changed = true;
+      while (changed) {
+        changed = false;
+        for (var j = 0; j < items.length; j++) {
+          if (used[j] || j === i) continue;
+          var b2 = items[j].box;
+          var oy = Math.min(cur.box[1] + cur.box[3], b2[1] + b2[3]) - Math.max(cur.box[1], b2[1]);
+          if (oy <= 0) continue;
+          var gap = b2[0] - (cur.box[0] + cur.box[2]);
+          var gapLimit = Math.max(50, cur.box[3] * 0.5);
+          if (b2[0] >= cur.box[0] - 5 && gap < gapLimit) {
+            var nt = joinTexts(cur.text, items[j].text);
+            // 货币符号词不参与合并（保持框只含数字，符号原样保留）
+            if (/^[¥￥$]/.test(cur.text) || /^[¥￥$]/.test(items[j].text)) continue;
+            if (/^[\d,]+\.?\d*$/.test(nt)) {
+              cur.box = [Math.min(cur.box[0], b2[0]), Math.min(cur.box[1], b2[1]),
+                         Math.max(cur.box[0] + cur.box[2], b2[0] + b2[2]) - Math.min(cur.box[0], b2[0]),
+                         Math.max(cur.box[1] + cur.box[3], b2[1] + b2[3]) - Math.min(cur.box[1], b2[1])];
+              cur.text = nt;
+              cur.conf = Math.min(cur.conf, items[j].conf);
+              used[j] = true;
+              changed = true;
+            }
+          }
+        }
+      }
+      merged.push(cur);
+    }
+    return merged;
+  }
+  function dedupeOverlap(items) {
+    items.sort(function (a, b) { return a.box[1] - b.box[1] || a.box[0] - b.box[0]; });
+    var out = [];
+    for (var i = 0; i < items.length; i++) {
+      var dup = false;
+      for (var j = 0; j < out.length; j++) {
+        var A = items[i].box, B = out[j].box;
+        var ix = Math.max(0, Math.min(A[0] + A[2], B[0] + B[2]) - Math.max(A[0], B[0]));
+        var iy = Math.max(0, Math.min(A[1] + A[3], B[1] + B[3]) - Math.max(A[1], B[1]));
+        var inter = ix * iy;
+        var small = Math.min(A[2] * A[3], B[2] * B[3]);
+        if (small > 0 && inter / small > 0.6) { dup = true; break; }
+      }
+      if (!dup) out.push(items[i]);
+    }
+    return out;
+  }
+
+  // ---------- 画布交互 ----------
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (!img) return;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    amounts.forEach(function (a, i) {
+      var bx = a.box[0] * scale, by = a.box[1] * scale;
+      var bw = a.box[2] * scale, bh = a.box[3] * scale;
+      ctx.strokeStyle = (i === selectedIdx) ? '#EA6668' : '#52C41A';
+      ctx.lineWidth = (i === selectedIdx) ? 3 : 2;
+      ctx.strokeRect(bx, by, bw, bh);
+      if (i === selectedIdx) { ctx.fillStyle = 'rgba(234,102,104,0.12)'; ctx.fillRect(bx, by, bw, bh); }
+    });
+    if (drawing) {
+      var d = drawing;
+      var x = Math.min(d.sx, d.ex), y = Math.min(d.sy, d.ey);
+      var w = Math.abs(d.ex - d.sx), h = Math.abs(d.ey - d.sy);
+      ctx.strokeStyle = '#EA6668'; ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]); ctx.strokeRect(x, y, w, h); ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(234,102,104,0.15)'; ctx.fillRect(x, y, w, h);
+    }
+  }
+  function fitCanvas() {
+    if (!img) return;
+    var maxW = Math.min(720, window.innerWidth - 24);
+    var maxH = Math.min(560, window.innerHeight * 0.55);
+    var r = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
+    scale = r;
+    canvas.width = Math.round(img.naturalWidth * r);
+    canvas.height = Math.round(img.naturalHeight * r);
+    draw();
+  }
+  function loadFile(f) {
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      img = new Image();
+      img.onload = function () {
+        origW = img.naturalWidth; origH = img.naturalHeight;
+        amounts = []; selectedIdx = -1; manualBox = null; drawing = null;
+        editorArea.classList.remove('hidden');
+        uploadZone.classList.add('have');
+        resultCard.classList.add('hidden');
+        fitCanvas();
+        updateInfo();
+        submitBtn.disabled = true;
+        runOcr();
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(f);
+  }
+  function canvasPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var clientX = e.clientX != null ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    var clientY = e.clientY != null ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: clientX - r.left, y: clientY - r.top };
+  }
+  canvas.addEventListener('mousedown', function (e) { startDraw(e); });
+  canvas.addEventListener('mousemove', function (e) { moveDraw(e); });
+  window.addEventListener('mouseup', function () { endDraw(); });
+  canvas.addEventListener('touchstart', function (e) { e.preventDefault(); startDraw(e); }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) { e.preventDefault(); moveDraw(e); }, { passive: false });
+  canvas.addEventListener('touchend', function (e) { e.preventDefault(); endDraw(); }, { passive: false });
+  function startDraw(e) {
+    if (!img) return;
+    var p = canvasPos(e);
+    isDown = true;
+    drawing = { sx: p.x, sy: p.y, ex: p.x, ey: p.y };
+  }
+  function moveDraw(e) {
+    if (!isDown || !drawing) return;
+    var p = canvasPos(e);
+    drawing.ex = p.x; drawing.ey = p.y;
+    draw();
+  }
+  function endDraw() {
+    if (!isDown) return;
+    isDown = false;
+    if (drawing) {
+      var d = drawing;
+      var x = Math.min(d.sx, d.ex), y = Math.min(d.sy, d.ey);
+      var w = Math.abs(d.ex - d.sx), h = Math.abs(d.ey - d.sy);
+      if (w > 6 && h > 6) {
+        manualBox = { x: Math.round(x / scale), y: Math.round(y / scale), w: Math.round(w / scale), h: Math.round(h / scale) };
+        selectedIdx = -1;
+        renderAmountList();
+      }
+      drawing = null;
+      draw(); updateInfo();
+    }
+  }
+
+  // ---------- 列表/状态 ----------
+  function renderAmountList() {
+    amountList.innerHTML = '';
+    if (amounts.length === 0) { amountArea.classList.add('hidden'); return; }
+    amountArea.classList.remove('hidden');
+    amounts.forEach(function (a, i) {
+      var div = document.createElement('div');
+      div.className = 'amount-item' + (i === selectedIdx ? ' active' : '');
+      div.innerHTML = '<span class="tag">金额' + (i + 1) + '</span><span>' + a.text + '</span><span class="conf">' +
+        Math.round((a.conf || 0) * 100) + '%</span>';
+      div.addEventListener('click', function () {
+        selectedIdx = (selectedIdx === i) ? -1 : i;
+        if (selectedIdx >= 0) { var a2 = amounts[selectedIdx]; manualBox = { x: a2.box[0], y: a2.box[1], w: a2.box[2], h: a2.box[3] }; }
+        else manualBox = null;
+        renderAmountList(); draw(); updateInfo();
+      });
+      amountList.appendChild(div);
+    });
+  }
+  function updateInfo() {
+    if (selectedIdx >= 0) {
+      var a = amounts[selectedIdx];
+      boxInfo.innerHTML = '已选择目标：<b>' + a.text + '</b>';
+      clearBtn.disabled = false;
+    } else if (manualBox) {
+      boxInfo.textContent = '已框选（原图坐标）: x=' + manualBox.x + ', y=' + manualBox.y + ', 宽=' + manualBox.w + ', 高=' + manualBox.h;
+      clearBtn.disabled = false;
+    } else {
+      boxInfo.textContent = '尚未选择目标：点选识别出的金额、手动框选，或直接输入指令';
+      clearBtn.disabled = true;
+    }
+    submitBtn.disabled = !img;
+  }
+  uploadZone.addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (f) loadFile(f);
+    fileInput.value = '';
+  });
+  clearBtn.addEventListener('click', function () {
+    amounts = []; selectedIdx = -1; manualBox = null;
+    renderAmountList(); draw(); updateInfo();
+  });
+  reOcrBtn.addEventListener('click', function () { if (img) runOcr(); });
+  instructionEl.addEventListener('input', function () { updateInfo(); });
+  newValueEl.addEventListener('input', function () { updateInfo(); });
+
+  // ---------- 图像分析（移植自服务端） ----------
+  function getImageData(imgData, x, y, w, h) {
+    var d = ctx.getImageData(x, y, w, h).data;
+    var px = new Array(w * h);
+    for (var i = 0; i < w * h; i++) {
+      var o = i * 4;
+      px[i] = [d[o], d[o + 1], d[o + 2]]; // BGR 顺序（canvas 为 RGBA，但按 bgr 语义取即可）
+    }
+    return px;
+  }
+  function median(arr) {
+    if (arr.length === 0) return [0, 0, 0];
+    var sorted = arr.slice().sort(function (a, b) { return a - b; });
+    return sorted[Math.floor(sorted.length / 2)];
+  }
+  function medianColor(px) {
+    var rs = [], gs = [], bs = [];
+    for (var i = 0; i < px.length; i++) { rs.push(px[i][0]); gs.push(px[i][1]); bs.push(px[i][2]); }
+    return [median(rs), median(gs), median(bs)];
+  }
+  // 返回 {bg, textColor, textHeight, align, x0,x1,y0,y1, mask, density}
+  function analyzeRegion(imgData, box) {
+    var x0 = Math.max(0, box.x), y0 = Math.max(0, box.y);
+    var x1 = Math.min(origW, box.x + box.w) - 1;
+    var y1 = Math.min(origH, box.y + box.h) - 1;
+    if (x1 - x0 < 3 || y1 - y0 < 3) return null;
+    var w = x1 - x0 + 1, h = y1 - y0 + 1;
+
+    // 边缘像素 → 背景色
+    var edge = [];
+    var d0 = ctx.getImageData(x0, y0, w, h).data;
+    for (var i = 0; i < w; i++) {
+      edge.push([d0[(0 * w + i) * 4], d0[(0 * w + i) * 4 + 1], d0[(0 * w + i) * 4 + 2]]);
+      edge.push([d0[((h - 1) * w + i) * 4], d0[((h - 1) * w + i) * 4 + 1], d0[((h - 1) * w + i) * 4 + 2]]);
+    }
+    for (var j = 0; j < h; j++) {
+      edge.push([d0[(j * w + 0) * 4], d0[(j * w + 0) * 4 + 1], d0[(j * w + 0) * 4 + 2]]);
+      edge.push([d0[(j * w + w - 1) * 4], d0[(j * w + w - 1) * 4 + 1], d0[(j * w + w - 1) * 4 + 2]]);
+    }
+    var bg = medianColor(edge);
+
+    // 文字 mask
+    var mask = new Uint8Array(w * h);
+    for (var k = 0; k < w * h; k++) {
+      var o = k * 4;
+      var diff = Math.max(Math.abs(d0[o] - bg[0]), Math.abs(d0[o + 1] - bg[1]), Math.abs(d0[o + 2] - bg[2]));
+      if (diff > 40) mask[k] = 1;
+    }
+    // 开运算去噪（2x2 简化：保留 4 邻域≥2 的）
+    var mask2 = new Uint8Array(w * h);
+    for (var yy = 1; yy < h - 1; yy++) {
+      for (var xx = 1; xx < w - 1; xx++) {
+        var c = 0;
+        for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
+          if (mask[(yy + dy) * w + (xx + dx)]) c++;
+        }
+        if (c >= 3) mask2[yy * w + xx] = 1;
+      }
+    }
+    mask = mask2;
+
+    // 主文字行（行像素和最大段）
+    var rowCounts = new Array(h).fill(0);
+    for (var rr = 0; rr < h; rr++) {
+      var s = 0;
+      for (var cc = 0; cc < w; cc++) if (mask[rr * w + cc]) s++;
+      rowCounts[rr] = s;
+    }
+    var bestStart = 0, bestEnd = 0, bestSum = -1, start = null, cur = 0;
+    for (var r2 = 0; r2 < h; r2++) {
+      if (rowCounts[r2] > 0) { if (start === null) start = r2; cur += rowCounts[r2]; }
+      else { if (start !== null && cur > bestSum) { bestSum = cur; bestStart = start; bestEnd = r2 - 1; } start = null; cur = 0; }
+    }
+    if (start !== null && cur > bestSum) { bestSum = cur; bestStart = start; bestEnd = h - 1; }
+    if (bestSum <= 0) return null;
+
+    var minX = w, maxX = -1, minY = h, maxY = -1;
+    var textPx = [];
+    for (var r3 = bestStart; r3 <= bestEnd; r3++) {
+      for (var c3 = 0; c3 < w; c3++) {
+        if (mask[r3 * w + c3]) {
+          if (c3 < minX) minX = c3;
+          if (c3 > maxX) maxX = c3;
+          if (r3 < minY) minY = r3;
+          if (r3 > maxY) maxY = r3;
+          var o3 = (r3 * w + c3) * 4;
+          textPx.push([d0[o3], d0[o3 + 1], d0[o3 + 2]]);
+        }
+      }
+    }
+    var textColor = medianColor(textPx);
+    var textHeight = maxY - minY + 1;
+
+    // 剥离左右窄符号（¥ 元）
+    var xl = minX, xr = maxX;
+    var strippedLeft = false, strippedRight = false;
+    var symW = Math.max(3, Math.round(textHeight * 1.05));
+    // 左符号
+    var segEnd = xl;
+    while (segEnd < xr && mask[bestStart * w + segEnd] > 0) segEnd++;
+    var segW = segEnd - xl;
+    var gapEnd = segEnd;
+    while (gapEnd <= xr && mask[bestStart * w + gapEnd] === 0) gapEnd++;
+    var gapW = gapEnd - segEnd;
+    if (segW > 0 && segW < symW && gapW >= Math.max(4, Math.round(textHeight * 0.15))) {
+      xl = gapEnd; strippedLeft = true;
+    }
+    // 右符号（"元"结尾，由 OCR 文本判定——此处按 mask 右端窄段剥离）
+    var segStart = xr;
+    while (segStart > xl && mask[bestStart * w + segStart] > 0) segStart--;
+    var segW2 = xr - segStart;
+    if (segW2 > 0 && segW2 < symW && mask[bestStart * w + segStart] === 0) {
+      var nx = segStart;
+      while (nx >= xl && mask[bestStart * w + nx] === 0) nx--;
+      if (nx >= xl) { xr = nx; strippedRight = true; }
+    }
+
+    var leftGap = xl, rightGap = w - xr - 1;
+    var align;
+    if (strippedLeft) align = 'left';
+    else if (strippedRight) align = 'right';
+    else if (leftGap > rightGap * 2.5) align = 'right';
+    else if (rightGap > leftGap * 2.5) align = 'left';
+    else align = 'center';
+
+    // 密度
+    var maskArea = 0;
+    for (var r4 = y0 + minY; r4 <= y0 + maxY; r4++) {
+      for (var c4 = x0 + minX; c4 <= x0 + maxX; c4++) {
+        if (mask[(r4 - y0) * w + (c4 - x0)]) maskArea++;
+      }
+    }
+    var density = maskArea / Math.max(1, textHeight * (maxX - minX + 1));
+
+    return {
+      x0: x0 + xl, x1: x0 + xr, y0: y0 + minY, y1: y0 + maxY,
+      bg: bg, textColor: textColor, textHeight: textHeight, align: align, density: density,
+      mask: mask, w: w, h: h
+    };
+  }
+
+  // ---------- 擦除（纯色背景填充 + 平滑） ----------
+  function eraseRegion(box) {
+    // 扩展区域，把旧数字完全覆盖
+    var padTop = Math.max(16, Math.round(box.h * 0.8));
+    var padBottom = Math.max(10, Math.round(box.h * 0.3));
+    var ex0 = Math.max(0, box.y - padTop), ex1 = Math.min(origH, box.y + box.h + padBottom);
+    var exBox = { x: Math.max(0, box.x - 6), y: ex0, w: Math.min(origW - Math.max(0, box.x - 6), box.w + 12), h: ex1 - ex0 };
+    var info = analyzeRegion({}, exBox);
+    // 上面 analyzeRegion 需要 imgData，但此处直接读 ctx
+    // 重新实现内联：直接用全局 ctx 分析 exBox
+    info = analyzeRegionCtx(exBox);
+    if (!info) return null;
+    var w = exBox.w, h = exBox.h;
+    var imgData = ctx.getImageData(exBox.x, exBox.y, w, h);
+    var d = imgData.data;
+    // mask 区域填背景色
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        if (info.mask[y * w + x]) {
+          var o = (y * w + x) * 4;
+          d[o] = info.bg[0]; d[o + 1] = info.bg[1]; d[o + 2] = info.bg[2];
+        }
+      }
+    }
+    ctx.putImageData(imgData, exBox.x, exBox.y);
+    // 对 mask 膨胀区做一次 3x3 均值平滑（抹平抗锯齿残留）
+    smoothMasked(exBox, info.mask, info.bg);
+    return info;
+  }
+
+  function analyzeRegionCtx(box) {
+    // 与 analyzeRegion 相同逻辑，但直接从 ctx 读取，返回分析结果
+    var x0 = Math.max(0, box.x), y0 = Math.max(0, box.y);
+    var x1 = Math.min(origW, box.x + box.w) - 1;
+    var y1 = Math.min(origH, box.y + box.h) - 1;
+    if (x1 - x0 < 3 || y1 - y0 < 3) return null;
+    var w = x1 - x0 + 1, h = y1 - y0 + 1;
+    var d0 = ctx.getImageData(x0, y0, w, h).data;
+    var edge = [];
+    for (var i = 0; i < w; i++) {
+      edge.push([d0[(0 * w + i) * 4], d0[(0 * w + i) * 4 + 1], d0[(0 * w + i) * 4 + 2]]);
+      edge.push([d0[((h - 1) * w + i) * 4], d0[((h - 1) * w + i) * 4 + 1], d0[((h - 1) * w + i) * 4 + 2]]);
+    }
+    for (var j = 0; j < h; j++) {
+      edge.push([d0[(j * w + 0) * 4], d0[(j * w + 0) * 4 + 1], d0[(j * w + 0) * 4 + 2]]);
+      edge.push([d0[(j * w + w - 1) * 4], d0[(j * w + w - 1) * 4 + 1], d0[(j * w + w - 1) * 4 + 2]]);
+    }
+    var bg = medianColor(edge);
+    var mask = new Uint8Array(w * h);
+    for (var k = 0; k < w * h; k++) {
+      var o = k * 4;
+      if (Math.max(Math.abs(d0[o] - bg[0]), Math.abs(d0[o + 1] - bg[1]), Math.abs(d0[o + 2] - bg[2])) > 40) mask[k] = 1;
+    }
+    var mask2 = new Uint8Array(w * h);
+    for (var yy = 1; yy < h - 1; yy++) for (var xx = 1; xx < w - 1; xx++) {
+      var c = 0;
+      for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) if (mask[(yy + dy) * w + (xx + dx)]) c++;
+      if (c >= 3) mask2[yy * w + xx] = 1;
+    }
+    mask = mask2;
+    var rowCounts = new Array(h).fill(0);
+    for (var rr = 0; rr < h; rr++) { var s = 0; for (var cc = 0; cc < w; cc++) if (mask[rr * w + cc]) s++; rowCounts[rr] = s; }
+    var bestStart = 0, bestEnd = 0, bestSum = -1, start = null, cur = 0;
+    for (var r2 = 0; r2 < h; r2++) {
+      if (rowCounts[r2] > 0) { if (start === null) start = r2; cur += rowCounts[r2]; }
+      else { if (start !== null && cur > bestSum) { bestSum = cur; bestStart = start; bestEnd = r2 - 1; } start = null; cur = 0; }
+    }
+    if (start !== null && cur > bestSum) { bestSum = cur; bestStart = start; bestEnd = h - 1; }
+    if (bestSum <= 0) return null;
+    var minX = w, maxX = -1, minY = h, maxY = -1;
+    var textPx = [];
+    for (var r3 = bestStart; r3 <= bestEnd; r3++) for (var c3 = 0; c3 < w; c3++) {
+      if (mask[r3 * w + c3]) {
+        if (c3 < minX) minX = c3; if (c3 > maxX) maxX = c3;
+        if (r3 < minY) minY = r3; if (r3 > maxY) maxY = r3;
+        var o3 = (r3 * w + c3) * 4;
+        textPx.push([d0[o3], d0[o3 + 1], d0[o3 + 2]]);
+      }
+    }
+    var textColor = medianColor(textPx);
+    var textHeight = maxY - minY + 1;
+    // 列像素计数（用于符号剥离：符号段窄、数字段宽）
+    var col = new Array(w).fill(0);
+    for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) if (mask[yy * w + xx]) col[xx]++;
+    var xl = minX, xr = maxX;
+    var strippedLeft = false, strippedRight = false;
+    var symW = Math.max(3, Math.round(textHeight * 1.05));
+    var minGap = Math.max(4, Math.round(textHeight * 0.15));
+    // 左符号（窄段 + 间隙）
+    var e = xl;
+    while (e <= maxX && col[e] > 0) e++;
+    var segW = e - xl;
+    var g = e;
+    while (g <= maxX && col[g] === 0) g++;
+    if (segW > 0 && segW < symW && (g - e) >= minGap) { xl = g; strippedLeft = true; }
+    // 右符号（从右端向左的窄段 + 间隙）
+    var s = xr;
+    while (s >= xl && col[s] > 0) s--;
+    var segW2 = xr - s;
+    var g2 = s;
+    while (g2 >= xl && col[g2] === 0) g2--;
+    if (segW2 > 0 && segW2 < symW && (s - g2) >= minGap) { xr = g2; strippedRight = true; }
+    var leftGap = xl, rightGap = w - xr - 1;
+    var align;
+    if (strippedLeft) align = 'left';
+    else if (strippedRight) align = 'right';
+    else if (leftGap > rightGap * 2.5) align = 'right';
+    else if (rightGap > leftGap * 2.5) align = 'left';
+    else align = 'center';
+    var maskArea = 0;
+    for (var r4 = minY; r4 <= maxY; r4++) for (var c4 = minX; c4 <= maxX; c4++) if (mask[r4 * w + c4]) maskArea++;
+    var density = maskArea / Math.max(1, textHeight * (maxX - minX + 1));
+    return {
+      x0: x0 + xl, x1: x0 + xr, y0: y0 + minY, y1: y0 + maxY,
+      bg: bg, textColor: textColor, textHeight: textHeight, align: align, density: density,
+      mask: mask, w: w, h: h
+    };
+  }
+
+  function smoothMasked(box, mask, bg) {
+    // 对 mask 及其周边 1px 做均值平滑
+    var w = box.w, h = box.h;
+    var imgData = ctx.getImageData(box.x, box.y, w, h);
+    var d = imgData.data;
+    var out = new Uint8ClampedArray(d);
+    for (var y = 1; y < h - 1; y++) for (var x = 1; x < w - 1; x++) {
+      var center = mask[y * w + x];
+      var near = 0;
+      for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) if (mask[(y + dy) * w + (x + dx)]) near++;
+      if (center || near > 0) {
+        // 只平滑 mask 膨胀区
+        var r = 0, g = 0, b = 0, n = 0;
+        for (var dy2 = -2; dy2 <= 2; dy2++) for (var dx2 = -2; dx2 <= 2; dx2++) {
+          var yy = y + dy2, xx = x + dx2;
+          if (yy < 0 || xx < 0 || yy >= h || xx >= w) continue;
+          if (mask[yy * w + xx]) continue; // 跳过仍属于文字的像素
+          var o2 = (yy * w + xx) * 4;
+          r += d[o2]; g += d[o2 + 1]; b += d[o2 + 2]; n++;
+        }
+        if (n > 0) {
+          var oo = (y * w + x) * 4;
+          out[oo] = r / n; out[oo + 1] = g / n; out[oo + 2] = b / n;
+        }
+      }
+    }
+    for (var i = 0; i < out.length; i++) d[i] = out[i];
+    ctx.putImageData(imgData, box.x, box.y);
+  }
+
+  // ---------- 渲染 ----------
+  // 离屏渲染测像素 bbox（画布尺寸随字号放大，避免大字号被裁剪导致测量失真）
+  function measureText(text, font, strokeW, fsHint) {
+    var est = fsHint || 200;
+    var c = document.createElement('canvas');
+    c.width = Math.max(1600, Math.round(est * Math.max(1, text.length) * 0.85) + 200);
+    c.height = Math.max(800, Math.round(est * 2));
+    var cc = c.getContext('2d', { willReadFrequently: true });
+    cc.font = font;
+    cc.textBaseline = 'alphabetic';
+    var baseY = Math.round(est * 1.25);
+    if (strokeW > 0) {
+      cc.lineWidth = strokeW; cc.lineJoin = 'round'; cc.strokeStyle = '#000';
+      cc.strokeText(text, 40, baseY);
+    }
+    cc.fillStyle = '#000';
+    cc.fillText(text, 40, baseY);
+    var d = cc.getImageData(0, 0, c.width, c.height).data;
+    var minX = c.width, maxX = -1, minY = c.height, maxY = -1, cnt = 0;
+    for (var y = 0; y < c.height; y += 1) {
+      for (var x = 0; x < c.width; x += 1) {
+        if (d[(y * c.width + x) * 4 + 3] > 32) {
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (y < minY) minY = y; if (y > maxY) maxY = y;
+          cnt++;
+        }
+      }
+    }
+    if (maxX < 0) return null;
+    return { x0: minX, y0: minY, x1: maxX + 1, y1: maxY + 1, w: maxX - minX + 1, h: maxY - minY + 1, cnt: cnt, baseY: baseY };
+  }
+
+  function renderTextToMain(text, info) {
+    // 窄数字字体优先（与常见金额 UI 数字宽高比接近），避免中文字体数字过宽
+    var families = ['"Helvetica Neue"', 'Arial', 'Roboto', 'sans-serif'].join(',');
+    var targetH = info.textHeight;
+    var rgb = info.textColor;
+    var colorStr = 'rgb(' + Math.round(rgb[2]) + ',' + Math.round(rgb[1]) + ',' + Math.round(rgb[0]) + ')';
+
+    // 字号校准：使像素高度 == targetH
+    function renderWith(weight, strokeW, fontSize) {
+      var font = weight + ' ' + Math.round(fontSize) + 'px ' + families;
+      var m = measureText(text, font, strokeW, fontSize);
+      return { m: m, font: font, strokeW: strokeW, fontSize: fontSize, weight: weight };
+    }
+    function calibrate(weight, strokeW) {
+      var fs = Math.max(10, Math.round(targetH * 1.3));
+      var r = null;
+      for (var i = 0; i < 14; i++) {
+        if (fs > 4000) break;
+        r = renderWith(weight, strokeW, fs);
+        if (!r.m) break;
+        if (Math.abs(r.m.h - targetH) <= 1) break;
+        fs = Math.max(4, Math.round(fs * targetH / r.m.h));
+      }
+      return r;
+    }
+    // 候选：常规 weight 400 + 描边 0/1/2；粗 weight 500/600/700 参与密度匹配
+    var cands = [];
+    var combos = [[400, 0], [400, 1], [400, 2], [500, 0], [500, 1], [600, 0], [600, 1], [700, 0]];
+    combos.forEach(function (cb) {
+      var r = calibrate(cb[0], cb[1]);
+      if (r && r.m) cands.push(r);
+    });
+    // 密度匹配：选密度最接近原字
+    var best = null;
+    cands.forEach(function (c) {
+      var dens = c.m.cnt / Math.max(1, c.m.w * c.m.h);
+      var diff = Math.abs(dens - info.density);
+      if (!best || diff < best.diff) best = { diff: diff, r: c, dens: dens };
+    });
+    var r2 = best ? best.r : calibrate(400, 0);
+    if (!r2 || !r2.m) return;
+
+    var m = r2.m;
+    // 宽度约束：不超过数字区可用宽（超出则等比微缩字号，保证不遮符号/不溢出）
+    var availW = info.x1 - info.x0 + 1;
+    if (m.w > availW + 4) {
+      var fs2 = Math.max(10, Math.round(r2.fontSize * (availW + 4) / m.w));
+      var r3 = renderWith(r2.weight, r2.strokeW, fs2);
+      if (r3 && r3.m) { r2 = r3; m = r3.m; }
+    }
+    // 定位（数字区已剥离符号）
+    var cy = (info.y0 + info.y1) >> 1;
+    var expY0 = cy - (m.h >> 1);
+    var expX0;
+    if (info.align === 'right') expX0 = info.x1 - m.w + 1;
+    else if (info.align === 'left') expX0 = info.x0;
+    else expX0 = ((info.x0 + info.x1) >> 1) - (m.w >> 1);
+
+    renderRecord = {
+      text: text, font: r2.font, strokeW: r2.strokeW, color: colorStr,
+      m: m, dstX: expX0, dstY: expY0
+    };
+  }
+  var renderRecord = null;
+
+  // ---------- 主处理 ----------
+  function processImage(targetBox, newVal) {
+    // 全分辨率离屏画布：从原图绘制
+    var off = document.createElement('canvas');
+    off.width = origW; off.height = origH;
+    var oc = off.getContext('2d');
+    oc.drawImage(img, 0, 0);
+
+    // 临时把 ctx 指向离屏画布做分析与擦除
+    var realCtx = ctx;
+    ctx = oc;
+
+    // 1. 扩展区域分析
+    var padTop = Math.max(16, Math.round(targetBox.h * 0.8));
+    var padBottom = Math.max(10, Math.round(targetBox.h * 0.3));
+    var ex0 = Math.max(0, targetBox.y - padTop);
+    var ex1 = Math.min(origH, targetBox.y + targetBox.h + padBottom);
+    var exBox = { x: Math.max(0, targetBox.x - 6), y: ex0, w: Math.min(origW - Math.max(0, targetBox.x - 6), targetBox.w + 12), h: ex1 - ex0 };
+
+    var info = analyzeRegionCtx(exBox);
+    if (!info) {
+      ctx = realCtx;
+      throw new Error('定位区域内未检测到文字，请重新框选');
+    }
+
+    // 2. 擦除（只擦数字区 x>=info.x0，保留左侧货币符号等）
+    //    高阈值主 mask + 低阈值抗锯齿边缘（邻域 2px 内）一并擦除
+    var w = exBox.w, h = exBox.h;
+    var imgData = oc.getImageData(exBox.x, exBox.y, w, h);
+    var d = imgData.data;
+    function nearMask(m, mw, mh, px, py, rad) {
+      for (var dy = -rad; dy <= rad; dy++) for (var dx = -rad; dx <= rad; dx++) {
+        var yy = py + dy, xx = px + dx;
+        if (yy < 0 || xx < 0 || yy >= mh || xx >= mw) continue;
+        if (m[yy * mw + xx]) return true;
+      }
+      return false;
+    }
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+      if ((exBox.x + x) < info.x0) continue;
+      var o = (y * w + x) * 4;
+      var diff = Math.max(Math.abs(d[o] - info.bg[0]), Math.abs(d[o + 1] - info.bg[1]), Math.abs(d[o + 2] - info.bg[2]));
+      var inMask = info.mask[y * w + x] === 1;
+      var nearEdge = !inMask && diff > 20 && nearMask(info.mask, w, h, x, y, 2);
+      if (inMask || nearEdge) {
+        d[o] = info.bg[0]; d[o + 1] = info.bg[1]; d[o + 2] = info.bg[2];
+      }
+    }
+    oc.putImageData(imgData, exBox.x, exBox.y);
+    smoothMaskedCtx(oc, exBox, info.mask, info.x0);
+
+    // 3. 渲染新值
+    renderRecord = null;
+    renderTextToMain(newVal, info);
+    if (renderRecord) {
+      var rr = renderRecord;
+      oc.font = rr.font;
+      oc.textBaseline = 'alphabetic';
+      var baseLine = rr.dstY + rr.m.baseY - rr.m.y0;
+      if (rr.strokeW > 0) {
+        oc.lineWidth = rr.strokeW; oc.lineJoin = 'round'; oc.strokeStyle = rr.color;
+        oc.strokeText(rr.text, rr.dstX, baseLine);
+      }
+      oc.fillStyle = rr.color;
+      oc.fillText(rr.text, rr.dstX, baseLine);
+    }
+
+    // 4. 回写显示画布
+    ctx = realCtx;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
+    return off;
+  }
+
+  function smoothMaskedCtx(c, box, mask, keepLeftOf) {
+    var w = box.w, h = box.h;
+    var imgData = c.getImageData(box.x, box.y, w, h);
+    var d = imgData.data;
+    var out = new Uint8ClampedArray(d);
+    for (var y = 2; y < h - 2; y++) for (var x = 2; x < w - 2; x++) {
+      if ((box.x + x) < (keepLeftOf || 0)) continue; // 符号区不平滑
+      var near = 0;
+      for (var dy = -2; dy <= 2; dy++) for (var dx = -2; dx <= 2; dx++) if (mask[(y + dy) * w + (x + dx)]) near++;
+      if (mask[y * w + x] || near > 0) {
+        var r = 0, g = 0, b = 0, n = 0;
+        for (var dy2 = -3; dy2 <= 3; dy2++) for (var dx2 = -3; dx2 <= 3; dx2++) {
+          var yy = y + dy2, xx = x + dx2;
+          if (yy < 0 || xx < 0 || yy >= h || xx >= w) continue;
+          if (mask[yy * w + xx]) continue;
+          var o2 = (yy * w + xx) * 4;
+          r += d[o2]; g += d[o2 + 1]; b += d[o2 + 2]; n++;
+        }
+        if (n > 0) {
+          var oo = (y * w + x) * 4;
+          out[oo] = r / n; out[oo + 1] = g / n; out[oo + 2] = b / n;
+        }
+      }
+    }
+    for (var i = 0; i < out.length; i++) d[i] = out[i];
+    c.putImageData(imgData, box.x, box.y);
+  }
+
+  // ---------- 提交 ----------
+  submitBtn.addEventListener('click', function () {
+    if (!img) { showStatus('请先上传截图', 'err'); return; }
+    var ins = instructionEl.value.trim();
+    var val = newValueEl.value.trim();
+    var target = '';
+
+    var m = ins.match(/^(?:把|将|请把|请将|修改|更改)?\s*(?:金额|价格|价钱|数字|¥|￥)?\s*([\d,]+(?:\.\d+)?)\s*(?:改成|改为|换成|变为|变更为|调成|->|→|=>)\s*[¥￥$]?\s*([\d,]+(?:\.\d+)?)\s*(?:元|块钱)?\s*$/);
+    if (m) { target = m[1]; val = m[2]; }
+    else if (selectedIdx >= 0) { /* 已选金额 */ }
+    else if (!manualBox) { showStatus('请输入指令，或选择/框选目标数字', 'err'); return; }
+
+    if (!val) { showStatus('缺少新值：请在指令或「新值」栏填写', 'err'); return; }
+
+    // 定位框
+    var box = null;
+    if (target) {
+      var t = normalizeAmount(target);
+      var hit = null;
+      amounts.forEach(function (a) { if (!hit && normalizeAmount(a.text) === t) hit = a; });
+      if (!hit) { showStatus('未识别到目标金额「' + target + '」，请点选金额或手动框选', 'err'); return; }
+      box = { x: hit.box[0], y: hit.box[1], w: hit.box[2], h: hit.box[3] };
+    } else if (selectedIdx >= 0) {
+      var sb = amounts[selectedIdx].box;
+      box = { x: sb[0], y: sb[1], w: sb[2], h: sb[3] };
+    } else {
+      box = manualBox;
+    }
+
+    submitBtn.disabled = true;
+    showStatus('处理中…');
+    setTimeout(function () {
+      try {
+        var off = processImage(box, val);
+        // 导出
+        off.toBlob(function (blob) {
+          if (!blob) { showStatus('导出失败，请重试', 'err'); submitBtn.disabled = false; return; }
+          var url = URL.createObjectURL(blob);
+          resultImg.src = url;
+          downloadBtn.href = url;
+          resultCard.classList.remove('hidden');
+          showStatus('处理完成，见下方结果图。', 'ok');
+          submitBtn.disabled = false;
+        }, 'image/png');
+      } catch (e) {
+        showStatus('处理失败：' + (e && e.message || e), 'err');
+        submitBtn.disabled = false;
+      }
+    }, 50);
+  });
+
+  redoBtn.addEventListener('click', function () {
+    resultCard.classList.add('hidden');
+    showStatus('');
+    if (img) { draw(); }
+  });
+})();
+</script>
+</body>
+</html>
