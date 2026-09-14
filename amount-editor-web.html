@@ -78,7 +78,7 @@
 <body>
 <div class="wrap">
   <h1>截图金额修改器（网页版）</h1>
-  <div class="sub">纯浏览器运行，不上传服务器。上传截图 → 识别金额 → 输入「把 800.00 改成 1,234.50」→ 处理下载。首次使用需加载识别引擎（约 10MB，之后有缓存）。</div>
+  <div class="sub">纯浏览器运行，不上传服务器。上传截图 → 自动识别金额 → 填新金额 → 处理下载。首次使用需加载识别引擎（约 10MB，之后有缓存）。</div>
 
   <div class="card">
     <h2>① 上传截图</h2>
@@ -88,7 +88,7 @@
     <input type="file" id="fileInput" accept="image/*">
     <div id="editorArea" class="hidden">
       <canvas id="cv"></canvas>
-      <div class="hint">可点击下方识别出的金额选中目标；也可在图上拖动框选。</div>
+      <div class="hint">已自动选中金额；可点下方列表切换，或拖动框选。</div>
       <div id="amountArea" class="hidden">
         <div id="amountList" class="amount-list"></div>
       </div>
@@ -101,14 +101,10 @@
   </div>
 
   <div class="card">
-    <h2>② 修改指令</h2>
+    <h2>② 填写新金额</h2>
     <div class="form-row">
       <div class="field">
-        <label>指令（自动定位，如：把 800 改成 1234）</label>
-        <input type="text" id="instruction" placeholder="把 800.00 改成 1,234.50" autocomplete="off">
-      </div>
-      <div class="field">
-        <label>新值（未用指令时填这里）</label>
+        <label>新金额（如：1234.50）</label>
         <input type="text" id="newValue" placeholder="1,234.50" autocomplete="off">
       </div>
     </div>
@@ -163,7 +159,6 @@
   var amountArea = document.getElementById('amountArea');
   var amountList = document.getElementById('amountList');
   var boxInfo = document.getElementById('boxInfo');
-  var instructionEl = document.getElementById('instruction');
   var newValueEl = document.getElementById('newValue');
   var submitBtn = document.getElementById('submitBtn');
   var statusEl = document.getElementById('status');
@@ -281,13 +276,23 @@
         });
       });
       var items = mergeAmountItems(raw);
-      amounts = items.filter(function (it) { return isAmount(it.text); });
+      // 过滤：仅保留置信度≥0.3 的金额候选，去掉 OCR 噪声
+      amounts = items.filter(function (it) { return isAmount(it.text) && it.conf >= 0.3; });
       amounts = dedupeOverlap(amounts);
       selectedIdx = -1;
       manualBox = null;
-      if (amounts.length === 1) {
-        selectedIdx = 0;
-        var a = amounts[0];
+      // 自动选中：优先带货币符号 → 其次带小数 → 再次置信度最高
+      if (amounts.length > 0) {
+        var bestIdx = 0, bestScore = -1;
+        amounts.forEach(function (a, i) {
+          var s = 0;
+          if (/[¥￥$]/.test(a.text)) s += 100;
+          if (/\.\d/.test(a.text)) s += 50;
+          s += (a.conf || 0) * 100;
+          if (s > bestScore) { bestScore = s; bestIdx = i; }
+        });
+        selectedIdx = bestIdx;
+        var a = amounts[bestIdx];
         manualBox = { x: a.box[0], y: a.box[1], w: a.box[2], h: a.box[3] };
       }
       renderAmountList();
@@ -295,9 +300,9 @@
       if (amounts.length === 0) {
         showStatus('未识别到金额，请手动框选目标数字。', 'err');
       } else if (amounts.length === 1) {
-        showStatus('识别到 1 处金额，已自动选中。填新值或指令后点「处理图片」。', 'ok');
+        showStatus('识别到 1 处金额，已自动选中。填新值后点「处理图片」。', 'ok');
       } else {
-        showStatus('识别到 ' + amounts.length + ' 处金额，点选目标或输入指令。', 'ok');
+        showStatus('识别到 ' + amounts.length + ' 处金额，已自动选中最高匹配项。填新值后点「处理图片」。', 'ok');
       }
       updateInfo();
       ocrBusy = false;
@@ -491,7 +496,7 @@
       boxInfo.textContent = '已框选（原图坐标）: x=' + manualBox.x + ', y=' + manualBox.y + ', 宽=' + manualBox.w + ', 高=' + manualBox.h;
       clearBtn.disabled = false;
     } else {
-      boxInfo.textContent = '尚未选择目标：点选识别出的金额、手动框选，或直接输入指令';
+      boxInfo.textContent = '尚未选择目标：点选识别出的金额或手动框选';
       clearBtn.disabled = true;
     }
     submitBtn.disabled = !img;
@@ -507,7 +512,6 @@
     renderAmountList(); draw(); updateInfo();
   });
   reOcrBtn.addEventListener('click', function () { if (img) runOcr(); });
-  instructionEl.addEventListener('input', function () { updateInfo(); });
   newValueEl.addEventListener('input', function () { updateInfo(); });
 
   // ---------- 图像分析（移植自服务端） ----------
@@ -681,8 +685,9 @@
     return info;
   }
 
-  function analyzeRegionCtx(box) {
+  function analyzeRegionCtx(box, anchorY) {
     // 与 analyzeRegion 相同逻辑，但直接从 ctx 读取，返回分析结果
+    // anchorY（原图坐标，可选）：主文字行参考中心；扩展区域内有多行文字时，选中心最接近 anchorY 的行，避免选到上方/下方文字
     var x0 = Math.max(0, box.x), y0 = Math.max(0, box.y);
     var x1 = Math.min(origW, box.x + box.w) - 1;
     var y1 = Math.min(origH, box.y + box.h) - 1;
@@ -711,15 +716,32 @@
       if (c >= 3) mask2[yy * w + xx] = 1;
     }
     mask = mask2;
+    // 行像素计数
     var rowCounts = new Array(h).fill(0);
     for (var rr = 0; rr < h; rr++) { var s = 0; for (var cc = 0; cc < w; cc++) if (mask[rr * w + cc]) s++; rowCounts[rr] = s; }
-    var bestStart = 0, bestEnd = 0, bestSum = -1, start = null, cur = 0;
-    for (var r2 = 0; r2 < h; r2++) {
-      if (rowCounts[r2] > 0) { if (start === null) start = r2; cur += rowCounts[r2]; }
-      else { if (start !== null && cur > bestSum) { bestSum = cur; bestStart = start; bestEnd = r2 - 1; } start = null; cur = 0; }
+    // 枚举非零行段，选主文字行：有 anchorY 时选中心最接近 anchorY 的段
+    var segs = [];
+    var st = null, acc = 0;
+    for (var r2 = 0; r2 <= h; r2++) {
+      var v = (r2 < h) ? rowCounts[r2] : 0;
+      if (v > 0) { if (st === null) st = r2; acc += v; }
+      else if (st !== null) { segs.push({ s: st, e: r2 - 1, sum: acc }); st = null; acc = 0; }
     }
-    if (start !== null && cur > bestSum) { bestSum = cur; bestStart = start; bestEnd = h - 1; }
-    if (bestSum <= 0) return null;
+    if (segs.length === 0) return null;
+    var bestStart, bestEnd;
+    if (anchorY != null) {
+      var bestD = Infinity;
+      for (var si = 0; si < segs.length; si++) {
+        var midAbs = y0 + (segs[si].s + segs[si].e) / 2;
+        var dD = Math.abs(midAbs - anchorY);
+        if (dD < bestD) { bestD = dD; bestStart = segs[si].s; bestEnd = segs[si].e; }
+      }
+    } else {
+      var bestSum = -1;
+      for (var si2 = 0; si2 < segs.length; si2++) {
+        if (segs[si2].sum > bestSum) { bestSum = segs[si2].sum; bestStart = segs[si2].s; bestEnd = segs[si2].e; }
+      }
+    }
     var minX = w, maxX = -1, minY = h, maxY = -1;
     var textPx = [];
     for (var r3 = bestStart; r3 <= bestEnd; r3++) for (var c3 = 0; c3 < w; c3++) {
@@ -732,9 +754,9 @@
     }
     var textColor = medianColor(textPx);
     var textHeight = maxY - minY + 1;
-    // 列像素计数（用于符号剥离：符号段窄、数字段宽）
+    // 列像素计数（仅主文字行内统计，避免其他行干扰符号剥离）
     var col = new Array(w).fill(0);
-    for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) if (mask[yy * w + xx]) col[xx]++;
+    for (var yy = bestStart; yy <= bestEnd; yy++) for (var xx = 0; xx < w; xx++) if (mask[yy * w + xx]) col[xx]++;
     var xl = minX, xr = maxX;
     var strippedLeft = false, strippedRight = false;
     var symW = Math.max(3, Math.round(textHeight * 1.05));
@@ -766,6 +788,8 @@
     return {
       x0: x0 + xl, x1: x0 + xr, y0: y0 + minY, y1: y0 + maxY,
       bg: bg, textColor: textColor, textHeight: textHeight, align: align, density: density,
+      strippedLeft: strippedLeft, strippedRight: strippedRight,
+      bestStart: bestStart, bestEnd: bestEnd,
       mask: mask, w: w, h: h
     };
   }
@@ -909,18 +933,22 @@
     var realCtx = ctx;
     ctx = oc;
 
-    // 1. 扩展区域分析
-    var padTop = Math.max(16, Math.round(targetBox.h * 0.8));
-    var padBottom = Math.max(10, Math.round(targetBox.h * 0.3));
+    // 1. 扩展区域分析（向上扩展克制，避免把上方其他文字包进来）
+    var padTop = Math.max(4, Math.round(targetBox.h * 0.3));
+    var padBottom = Math.max(6, Math.round(targetBox.h * 0.25));
     var ex0 = Math.max(0, targetBox.y - padTop);
     var ex1 = Math.min(origH, targetBox.y + targetBox.h + padBottom);
     var exBox = { x: Math.max(0, targetBox.x - 6), y: ex0, w: Math.min(origW - Math.max(0, targetBox.x - 6), targetBox.w + 12), h: ex1 - ex0 };
 
-    var info = analyzeRegionCtx(exBox);
+    var info = analyzeRegionCtx(exBox, targetBox.y + targetBox.h / 2);
     if (!info) {
       ctx = realCtx;
       throw new Error('定位区域内未检测到文字，请重新框选');
     }
+    // 数字横向区兜底：符号剥离失败时，用目标框范围约束，保证新数字不压住左侧 ¥ 符号
+    if (!info.strippedLeft) info.x0 = Math.max(info.x0, targetBox.x);
+    if (!info.strippedRight) info.x1 = Math.min(info.x1, targetBox.x + targetBox.w);
+    if (info.x1 - info.x0 < 2) { info.x0 = exBox.x; info.x1 = Math.min(exBox.x + exBox.w, targetBox.x + targetBox.w); }
 
     // 2. 擦除（只擦数字区 x>=info.x0，保留左侧货币符号等）
     //    高阈值主 mask + 低阈值抗锯齿边缘（邻域 2px 内）一并擦除
@@ -937,6 +965,9 @@
     }
     for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
       if ((exBox.x + x) < info.x0) continue;
+      // 只擦主文字行（±2px），绝不波及上方/下方其他文字
+      var absY = exBox.y + y;
+      if (absY < exBox.y + info.bestStart - 2 || absY > exBox.y + info.bestEnd + 2) continue;
       var o = (y * w + x) * 4;
       var diff = Math.max(Math.abs(d[o] - info.bg[0]), Math.abs(d[o + 1] - info.bg[1]), Math.abs(d[o + 2] - info.bg[2]));
       var inMask = info.mask[y * w + x] === 1;
@@ -946,7 +977,7 @@
       }
     }
     oc.putImageData(imgData, exBox.x, exBox.y);
-    smoothMaskedCtx(oc, exBox, info.mask, info.x0);
+    smoothMaskedCtx(oc, exBox, info.mask, info.x0, info.bestStart - 2, info.bestEnd + 2);
 
     // 3. 渲染新值
     renderRecord = null;
@@ -971,12 +1002,13 @@
     return off;
   }
 
-  function smoothMaskedCtx(c, box, mask, keepLeftOf) {
+  function smoothMaskedCtx(c, box, mask, keepLeftOf, keepY0, keepY1) {
     var w = box.w, h = box.h;
     var imgData = c.getImageData(box.x, box.y, w, h);
     var d = imgData.data;
     var out = new Uint8ClampedArray(d);
     for (var y = 2; y < h - 2; y++) for (var x = 2; x < w - 2; x++) {
+      if (y < (keepY0 || 0) || y > (keepY1 == null ? h - 1 : keepY1)) continue; // 只平滑主文字行
       if ((box.x + x) < (keepLeftOf || 0)) continue; // 符号区不平滑
       var near = 0;
       for (var dy = -2; dy <= 2; dy++) for (var dx = -2; dx <= 2; dx++) if (mask[(y + dy) * w + (x + dx)]) near++;
@@ -1002,31 +1034,18 @@
   // ---------- 提交 ----------
   submitBtn.addEventListener('click', function () {
     if (!img) { showStatus('请先上传截图', 'err'); return; }
-    var ins = instructionEl.value.trim();
     var val = newValueEl.value.trim();
-    var target = '';
+    if (!val) { showStatus('缺少新值：请在上方填写新金额', 'err'); return; }
 
-    var m = ins.match(/^(?:把|将|请把|请将|修改|更改)?\s*(?:金额|价格|价钱|数字|¥|￥)?\s*([\d,]+(?:\.\d+)?)\s*(?:改成|改为|换成|变为|变更为|调成|->|→|=>)\s*[¥￥$]?\s*([\d,]+(?:\.\d+)?)\s*(?:元|块钱)?\s*$/);
-    if (m) { target = m[1]; val = m[2]; }
-    else if (selectedIdx >= 0) { /* 已选金额 */ }
-    else if (!manualBox) { showStatus('请输入指令，或选择/框选目标数字', 'err'); return; }
-
-    if (!val) { showStatus('缺少新值：请在指令或「新值」栏填写', 'err'); return; }
-
-    // 定位框
+    // 定位框：优先已选中目标，其次手动框选
     var box = null;
-    if (target) {
-      var t = normalizeAmount(target);
-      var hit = null;
-      amounts.forEach(function (a) { if (!hit && normalizeAmount(a.text) === t) hit = a; });
-      if (!hit) { showStatus('未识别到目标金额「' + target + '」，请点选金额或手动框选', 'err'); return; }
-      box = { x: hit.box[0], y: hit.box[1], w: hit.box[2], h: hit.box[3] };
-    } else if (selectedIdx >= 0) {
+    if (selectedIdx >= 0) {
       var sb = amounts[selectedIdx].box;
       box = { x: sb[0], y: sb[1], w: sb[2], h: sb[3] };
     } else {
       box = manualBox;
     }
+    if (!box) { showStatus('请先选择或框选目标数字', 'err'); return; }
 
     submitBtn.disabled = true;
     showStatus('处理中…');
